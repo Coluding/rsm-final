@@ -1,0 +1,13 @@
+.idea
+log/
+*.log
+__pycache__/
+*.pt
+runs/
+*.pth
+custom_stable_baselines
+wandb
+logging
+ressources/run_configs
+best_policy*
+*.out
