@@ -87,7 +87,7 @@ The simulation scenarios are defined in `ressources/run_configs/`. Each configur
 -   **`easy/`**: Simplified scenarios ideal for quick debugging and testing.
 -   **`40_steps/`**: Scenarios designed for short episodes (40 simulation steps).
 -   **`400_steps/`**: Longer episodes (400 simulation steps), more realistic for convergence testing.
-
+- **1500_steps/**: Extended scenarios (1500 simulation steps) for in-depth training with 15 locations instead of just 8.
 To use a specific configuration, pass the folder name (relative to `ressources/run_configs/`) to the `--run_config` argument.
 
 ## Running the Code
