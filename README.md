@@ -1,5 +1,23 @@
 # Optimizing State Machine Replication with Reinforcement Learning and Graph Neural Networks
 
+## Abstract 
+Replicated state machines (RSMs) are a core abstraction for building fault-
+tolerant distributed services, but their performance in wide-area deployments is highly sen-
+sitive to replica placement. Static placement strategies fail to adapt to dynamic and geo-
+graphically shifting client demand, while existing dynamic approaches rely on greedy, myopic
+reconfiguration heuristics with non-negligible runtime overhead.
+In this work, we study dynamic replica placement as a stochastic location-allocation problem
+and formalize it within an optimization framework related to dynamic facility location. We
+propose a reinforcement learning-based solution that learns replica reconfiguration policies
+offline from simulated system trajectories and enables constant-time decision making at run-
+time. The approach combines spatio-temporal graph representations with policy optimization
+to capture global communication effects and long-term trade-offs. Experimental results using
+a full-system simulation show that the learned policy consistently outperforms both static
+placement and the existing greedy baseline, with increasing benefits for longer horizons and
+larger configuration spaces. These findings demonstrate that learning-based optimization is
+a practical and effective alternative for dynamic replica management in wide-area replicated
+systems
+
 This repository contains the implementation of a research project that leverages **Reinforcement Learning (RL)** and **Graph Neural Networks (GNNs)** to optimize distributed **Byzantine Fault-Tolerant (BFT) State Machine Replication** systems. The system trains RL agents to make intelligent reconfiguration decisions (e.g., swapping active and passive replica locations) to minimize client perceived latency.
 
 ## Table of Contents
