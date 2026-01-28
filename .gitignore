@@ -11,3 +11,11 @@ logging
 ressources/run_configs
 best_policy*
 *.out
+
+LOCATION*
+CLAUDE.md
+
+.venv
+.run
+.claude
+.vscode

@@ -227,7 +227,7 @@ class OnPolicyAgent:
 
         return advantages
 
-    def compute_reward_to_go(rewards, gamma=0.99):
+    def compute_reward_to_go(self, rewards):
         """
         Computes reward-to-go for each timestep t:
         G_t = r_t + γ r_{t+1} + γ^2 r_{t+2} + ... + γ^(T-t) r_T
@@ -235,7 +235,7 @@ class OnPolicyAgent:
         G = torch.zeros_like(rewards, dtype=torch.float)
         future_return = 0
         for t in reversed(range(len(rewards))):
-            future_return = rewards[t] + gamma * future_return
+            future_return = rewards[t] + self.gamma * future_return
             G[t] = future_return
         return G
 
@@ -267,58 +267,87 @@ class OnPolicyAgent:
 
         return advantages
 
-    def compute_clipped_advantage(self, rewards, values, dones):
-        """
-        Computes the clipped advamtage to ensure smooth training
-        """
-
     def train_step_reinforce(self):
         if len(self.replay_buffer) < self.batch_size:
             return
 
-        iterator = tqdm.tqdm(range(self.update_epochs), desc="Running epoch training...", unit="epoch")
-        for _ in iterator:
-            epoch_loss = 0
-            for batch in self.replay_buffer(self.batch_size, shuffle=False):
-                states, actions, _, rewards, _, dones, timesteps = zip(*batch)
+        #self.replay_buffer.normalize_rewards() if self.reward_scaling else None
+        iterator = tqdm.tqdm(self.replay_buffer(self.batch_size), desc="Running epoch training...", unit="epoch",
+                             total=self.update_epochs)
+        for i, batch in enumerate(iterator):
+            if batch is None:
+                logger.info("Not ready to train yet")
+                return
+            states, actions, _, rewards, _, dones, timesteps = zip(*batch)
 
-                batched_states = Batch.from_data_list(states).to(self.device)
-                actions = torch.tensor(actions, dtype=torch.long, device=self.device)
-                rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
-                timesteps = torch.tensor(timesteps, dtype=torch.long, device=self.device) if self.use_timestep_context else None
-                # Compute baseline-subtracted reward-to-go
-                reward_to_go = self.compute_reward_to_go_with_baseline(rewards)
+            batched_states = Batch.from_data_list(states).to(self.device)
+            actions = torch.tensor(actions, dtype=torch.long, device=self.device)
+            rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+            timesteps = torch.tensor(timesteps, dtype=torch.long, device=self.device) if self.use_timestep_context else None
 
-                # Compute policy loss
-                logits = self.policy_net(batched_states, timesteps)
+            # Compute baseline-subtracted reward-to-go
+            reward_to_go = self.compute_reward_to_go_with_baseline(rewards)
+
+            # Compute policy loss
+            if isinstance(self.policy_net.action_mapper, SwapActionMapper):
+                add_logits, remove_logits = self.policy_net(batched_states, self.temporal_size)
+                add_dist = torch.distributions.Categorical(logits=add_logits)
+                remove_dist = torch.distributions.Categorical(logits=remove_logits)
+                add_log_probs = add_dist.log_prob(actions[:, 0])
+                remove_log_probs = remove_dist.log_prob(actions[:, 1])
+                entropy = (add_dist.entropy() + remove_dist.entropy()).mean()
+
+                policy_loss = -torch.mean((add_log_probs + remove_log_probs) * reward_to_go)
+                policy_loss = policy_loss - self.entropy_coeff * entropy
+
+                self.logger.add_scalar("Entropy", entropy, self.training_step)
+
+            elif isinstance(self.policy_net.action_mapper, CrossProductSwapActionMapper):
+                logits = self.policy_net(batched_states, timesteps, self.temporal_size)
+                mask = self._process_mask(batched_states, actions.shape[0])
+                logits = logits + mask
                 dist = torch.distributions.Categorical(logits=logits)
                 log_probs = dist.log_prob(actions)
-                policy_loss = -torch.mean(log_probs * reward_to_go)  # Policy gradient update
+                entropy = dist.entropy().mean()
 
-                self.optimizer.zero_grad()
-                policy_loss.backward()
-                self.optimizer.step()
+                policy_loss = -torch.mean(log_probs * reward_to_go)
+                policy_loss = policy_loss - self.entropy_coeff * entropy
 
-                epoch_loss += policy_loss.item()
-                self.logger.add_scalar("Policy Loss", policy_loss.item(), self.training_step)
-                iterator.set_postfix({"Policy Loss": policy_loss.item()})
+                self.logger.add_scalar("Entropy", entropy, self.training_step)
 
-                self.training_step += 1
+            else:
+                raise NotImplementedError(f"Action mapper of type {type(self.policy_net.action_mapper)} not supported")
 
-                if policy_loss < self.best_loss:
-                    self.best_loss = policy_loss
-                    torch.save(self.policy_net.state_dict(), "best_policy_re.pth")
+            self.logger.add_scalar("Policy Loss", policy_loss.item(), self.training_step)
 
-            self.logger.add_scalar("Epoch Loss", epoch_loss)
+            self.optimizer.zero_grad()
+            policy_loss.backward()
 
-        self.replay_buffer.clear()
+            # Log gradient norm
+            grad_norm = nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+            self.logger.add_scalar("Policy Grad Norm", grad_norm, self.training_step)
+
+            self.optimizer.step()
+
+            self.training_step += 1
+
+            if policy_loss < self.best_loss:
+                self.best_loss = policy_loss
+                torch.save(self.policy_net.state_dict(), "best_policy_reinforce.pth")
+
+            iterator.set_postfix({"Policy Loss": policy_loss.item()})
+
+            if i >= self.update_epochs:
+                break
 
     def save_model(self, directory: str):
         path = os.path.join(directory + self.save_path)
         policy_path = os.path.join(path, "policy.pth")
-        value_path = os.path.join(path, "value.pth")
         torch.save(self.policy_net.state_dict(), policy_path)
-        torch.save(self.value_net.state_dict(), value_path)
+
+        if self.value_net is not None:
+            value_path = os.path.join(path, "value.pth")
+            torch.save(self.value_net.state_dict(), value_path)
 
     def load_model(self, directory: str = None, path: str = None):
         if path is None:
@@ -332,7 +361,9 @@ class OnPolicyAgent:
             value_path = os.path.join(path, "value.pth")
 
         self.policy_net.load_state_dict(torch.load(policy_path))
-        self.value_net.load_state_dict(torch.load(value_path))
+
+        if self.value_net is not None and os.path.exists(value_path):
+            self.value_net.load_state_dict(torch.load(value_path))
 
     def train_step(self):
         if len(self.replay_buffer) < self.batch_size:
@@ -525,6 +556,8 @@ class OnPolicyAgent:
                             self.train_step()
                         case "REINFORCE":
                             self.train_step_reinforce()
+                        case _:
+                            raise NotImplementedError(f"Algorithm {self.algorithm} not implemented")
 
             logger.info("Episode [{}]Average Reward: {:.4f}".format(episode, np.mean(rewards)))
 
@@ -574,7 +607,7 @@ class OnPolicyAgent:
                 ax.legend()
                 self.logger.add_figure(f"Episode {episode} Latency", fig, episode)
 
-                if not isinstance(action, tuple) :
+                if not isinstance(action, tuple):
                     fig, ax = plt.subplots(figsize=(10, 5))
                     ax.hist(episode_actions, bins=np.arange(min(episode_actions) - 0.5, max(episode_actions) + 1.5, 1),
                             edgecolor="black")
@@ -583,6 +616,28 @@ class OnPolicyAgent:
                     ax.set_title("Action Selection Histogram (Last 10 Episodes)")
                     self.logger.add_figure(f"Episode {episode} Action Histogram", fig, episode)
                     action_history.clear()
+
+                # --- Multi-line scalar plots for WandB/TensorBoard ---
+                # We log these as scalars such that we have a multi-line scalar plot for each eval step.
+                # 'episode' is used in the tag to keep different evaluation steps separate.
+                for i_step in range(len(rewards)):
+                    # Log Rewards
+                    reward_scalars = {
+                        "Policy": rewards[i_step],
+                        "Static": baseline_rewards[i_step] if i_step < len(baseline_rewards) else baseline_rewards[-1],
+                        "Random": random_baseline_rewards[i_step] if i_step < len(random_baseline_rewards) else random_baseline_rewards[-1],
+                        "Fluidity": fluidity_baseline_rewards[i_step] if i_step < len(fluidity_baseline_rewards) else fluidity_baseline_rewards[-1]
+                    }
+                    self.logger.add_scalars(f"baseline_eval_step_{episode}/Reward", reward_scalars, i_step)
+
+                    # Log Latencies
+                    latency_scalars = {
+                        "Policy": pure_latencies[i_step],
+                        "Static": pure_baseline_latencies[i_step] if i_step < len(pure_baseline_latencies) else pure_baseline_latencies[-1],
+                        "Random": random_pure_latencies[i_step] if i_step < len(random_pure_latencies) else random_pure_latencies[-1],
+                        "Fluidity": fluidity_baseline_latencies[i_step] if i_step < len(fluidity_baseline_latencies) else fluidity_baseline_latencies[-1]
+                    }
+                    self.logger.add_scalars(f"baseline_eval_step_{episode}/Latency", latency_scalars, i_step)
 
                 self.logger.add_text(f"Starting Locations episode {episode}", str(starting_locs), episode)
 

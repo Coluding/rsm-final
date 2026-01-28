@@ -11,14 +11,17 @@ def dqn(type_embedding_dim: int = 12, hidden_dim: int = 64, action_layer: int = 
           target_update: int = 10, priority: bool = False, epsilon: float = 1.0, epsilon_decay: float = 0.995,
           epsilon_min: float = 0.1, stack_states: int = 4, reward_scaling: bool = False, eval_every: int = 10,
             num_episodes: int = 1000, action_space="separate", use_client_embeddings=False, use_timestep_context=None,
-            update_epochs=20, train_every_steps=50, load_path=None):
+            update_epochs=20, train_every_steps=50, load_path=None, run_config: str = "easy/", use_reconfig_costs: bool = True,
+            reduced_state_space: bool = True):
     config = FluidityEnvironmentConfig(
         jar_path="./ressources/jars/simulator-xmr-0.0.1-SNAPSHOT-jar-with-dependencies.jar",
-        jvm_options=['-Djava.security.properties=/home/lukas/flusim/simurun/server0/xmr/config/java.security'],
-        configuration_directory_simulator="./ressources/run_configs/400_steps/",
+        jvm_options=['-Djava.security.properties=ressources/run_configs/40_steps/simurun/client0/xmr/config/java.security'],
+        configuration_directory_simulator="./ressources/run_configs/" + run_config,
         node_identifier="server0",
-        device="cuda",
-        feature_dim_node=1
+        device="cpu",
+        feature_dim_node=1,
+        use_reconfig_costs=use_reconfig_costs,
+        reduced_state_space=reduced_state_space
     )
 
     env = FluidityEnvironment(config)
@@ -74,7 +77,7 @@ def on_policy(type_embedding_dim: int = 12, hidden_dim: int = 64, action_layer: 
 
     config = FluidityEnvironmentConfig(
         jar_path="./ressources/jars/simulator-xmr-0.0.1-SNAPSHOT-jar-with-dependencies.jar",
-        jvm_options=['-Djava.security.properties=/home/lukas/flusim/simurun/server0/xmr/config/java.security'],
+        jvm_options=['-Djava.security.properties=ressources/run_configs/40_steps/simurun/client0/xmr/config/java.security'],
         configuration_directory_simulator="./ressources/run_configs/" + run_config,
         node_identifier="server0",
         device="cuda",
