@@ -18,7 +18,10 @@ larger configuration spaces. These findings demonstrate that learning-based opti
 a practical and effective alternative for dynamic replica management in wide-area replicated
 systems
 
+## Project
+
 This repository contains the implementation of a research project that leverages **Reinforcement Learning (RL)** and **Graph Neural Networks (GNNs)** to optimize distributed **Byzantine Fault-Tolerant (BFT) State Machine Replication** systems. The system trains RL agents to make intelligent reconfiguration decisions (e.g., swapping active and passive replica locations) to minimize client perceived latency.
+
 
 ## Table of Contents
 1. [Project Overview](#project-overview)
